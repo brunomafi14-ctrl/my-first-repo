@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bounty Run — Crime Car Chase</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --road: #2b2f36;
+    --road-line: #f1c40f;
+    --grass: #2a3b1e;
+    --building: #4a4e57;
+    --building-2: #3a3e47;
+    --hud: rgba(0, 0, 0, 0.55);
+    --accent: #ff3b3b;
+    --money: #4ade80;
+    --text: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  #wrap {
+    position: relative;
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas {
+    display: block;
+    background: var(--grass);
+    image-rendering: pixelated;
+    width: 100vw; height: 100vh;
+  }
+  #hud {
+    position: absolute; top: 12px; left: 12px;
+    background: var(--hud);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    min-width: 200px;
+    backdrop-filter: blur(4px);
+  }
+  #hud .row { display: flex; justify-content: space-between; gap: 16px; }
+  #hud .label { opacity: 0.75; }
+  #hud .money { color: var(--money); font-weight: 700; }
+  #hud .wanted { color: var(--accent); font-weight: 700; letter-spacing: 1px; }
+  #help {
+    position: absolute; bottom: 12px; left: 12px;
+    background: var(--hud);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    opacity: 0.9;
+    max-width: 320px;
+    line-height: 1.5;
+  }
+  #help b { color: #ffd166; }
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 20px;
+    backdrop-filter: blur(6px);
+  }
+  #overlay.hidden { display: none; }
+  #overlay h1 { font-size: 42px; margin: 0 0 8px; letter-spacing: 2px; }
+  #overlay h2 { font-size: 22px; margin: 0 0 16px; color: #ffd166; }
+  #overlay p { max-width: 480px; opacity: 0.85; margin: 6px 0; }
+  #overlay button {
+    margin-top: 18px;
+    background: var(--accent);
+    color: white; border: none;
+    padding: 12px 22px; font-size: 16px;
+    border-radius: 8px; cursor: pointer;
+    font-weight: 700; letter-spacing: 1px;
+  }
+  #overlay button:hover { filter: brightness(1.1); }
+  #flash {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background: red; opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <div class="row"><span class="label">Bounty</span><span class="money" id="money">$0</span></div>
+    <div class="row"><span class="label">Wanted</span><span class="wanted" id="stars">—</span></div>
+    <div class="row"><span class="label">Heat</span><span id="heat">0%</span></div>
+    <div class="row"><span class="label">Best</span><span id="best">$0</span></div>
+  </div>
+  <div id="help">
+    <b>WASD</b> or <b>Arrow keys</b> to drive. Roll over a <b>red crime spot</b> to rob it — your bounty goes up and the cops come for you. Lose all your heat by laying low (no crimes for a while). Don't get caught!
+  </div>
+  <div id="flash"></div>
+  <div id="overlay">
+    <h1>BOUNTY RUN</h1>
+    <h2>Crime. Cash. Car chase.</h2>
+    <p>You're a getaway driver. Hit the red <b>crime spots</b> to rack up bounty. The more you steal, the more cops show up — and the faster they get.</p>
+    <p>Drive with <b>WASD</b> or arrow keys. Press <b>Space</b> for handbrake.</p>
+    <p id="finalScore" style="display:none;"></p>
+    <button id="startBtn">START</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const moneyEl = document.getElementById('money');
+  const starsEl = document.getElementById('stars');
+  const heatEl = document.getElementById('heat');
+  const bestEl = document.getElementById('best');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const finalScore = document.getElementById('finalScore');
+  const flash = document.getElementById('flash');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- World ----------
+  const WORLD = { w: 4000, h: 4000 };
+  const BLOCK = 400;           // city grid block size
+  const ROAD = 90;             // road width
+  const camera = { x: 0, y: 0 };
+
+  // Build a grid-based city. Roads run along every BLOCK line.
+  const buildings = [];
+  function buildCity() {
+    buildings.length = 0;
+    for (let bx = 0; bx < WORLD.w; bx += BLOCK) {
+      for (let by = 0; by < WORLD.h; by += BLOCK) {
+        // Inside each block, leave a padding for the road, then place a building.
+        const pad = ROAD / 2 + 14;
+        const x = bx + pad;
+        const y = by + pad;
+        const w = BLOCK - pad * 2;
+        const h = BLOCK - pad * 2;
+        if (w <= 0 || h <= 0) continue;
+        // Sometimes split a block into 2-4 buildings to look less uniform.
+        const split = Math.random();
+        if (split < 0.35) {
+          buildings.push({ x, y, w, h, c: pickBuildingColor() });
+        } else if (split < 0.7) {
+          const gap = 10;
+          const w2 = (w - gap) / 2;
+          buildings.push({ x, y, w: w2, h, c: pickBuildingColor() });
+          buildings.push({ x: x + w2 + gap, y, w: w2, h, c: pickBuildingColor() });
+        } else {
+          const gap = 10;
+          const w2 = (w - gap) / 2;
+          const h2 = (h - gap) / 2;
+          buildings.push({ x, y, w: w2, h: h2, c: pickBuildingColor() });
+          buildings.push({ x: x + w2 + gap, y, w: w2, h: h2, c: pickBuildingColor() });
+          buildings.push({ x, y: y + h2 + gap, w: w2, h: h2, c: pickBuildingColor() });
+          buildings.push({ x: x + w2 + gap, y: y + h2 + gap, w: w2, h: h2, c: pickBuildingColor() });
+        }
+      }
+    }
+  }
+  function pickBuildingColor() {
+    const palette = ['#4a4e57', '#3a3e47', '#52565f', '#3f4350', '#5a5f6a', '#46505b'];
+    return palette[(Math.random() * palette.length) | 0];
+  }
+
+  // Check if a point is on the road (between blocks).
+  function isRoad(x, y) {
+    const mx = ((x % BLOCK) + BLOCK) % BLOCK;
+    const my = ((y % BLOCK) + BLOCK) % BLOCK;
+    return mx < ROAD || mx > BLOCK - ROAD || my < ROAD || my > BLOCK - ROAD;
+  }
+
+  // ---------- Entities ----------
+  const player = {
+    x: BLOCK, y: BLOCK,
+    angle: -Math.PI / 2,
+    speed: 0,
+    maxSpeed: 260,
+    accel: 380,
+    brake: 600,
+    friction: 220,
+    turn: 2.6,
+    w: 22, h: 38,
+    alive: true,
+  };
+
+  const crimeSpots = [];
+  function spawnCrimeSpot() {
+    // Place at a random intersection-ish location, on a building.
+    for (let tries = 0; tries < 40; tries++) {
+      const bx = (Math.random() * (WORLD.w / BLOCK - 2) + 1) | 0;
+      const by = (Math.random() * (WORLD.h / BLOCK - 2) + 1) | 0;
+      const x = bx * BLOCK + BLOCK / 2;
+      const y = by * BLOCK + BLOCK / 2;
+      // Make sure not too close to the player.
+      const d = Math.hypot(x - player.x, y - player.y);
+      if (d < 500) continue;
+      // And not too close to existing crime spots.
+      let ok = true;
+      for (const c of crimeSpots) {
+        if (Math.hypot(c.x - x, c.y - y) < 600) { ok = false; break; }
+      }
+      if (!ok) continue;
+      const value = 200 + ((Math.random() * 600) | 0);
+      crimeSpots.push({ x, y, r: 26, value, pulse: Math.random() * Math.PI * 2 });
+      return;
+    }
+  }
+
+  const cops = [];
+  function spawnCop() {
+    // Spawn just off-screen relative to camera.
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 700 + Math.random() * 200;
+    const x = player.x + Math.cos(angle) * dist;
+    const y = player.y + Math.sin(angle) * dist;
+    cops.push({
+      x: Math.max(60, Math.min(WORLD.w - 60, x)),
+      y: Math.max(60, Math.min(WORLD.h - 60, y)),
+      angle: Math.random() * Math.PI * 2,
+      speed: 0,
+      maxSpeed: 220 + Math.random() * 40,
+      accel: 320,
+      turn: 2.0,
+      w: 22, h: 38,
+      sirenPhase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  // ---------- State ----------
+  let bounty = 0;
+  let heat = 0;            // 0..1
+  let wantedLevel = 0;     // 0..5
+  let lastCrimeAt = 0;
+  let best = +localStorage.getItem('bountyRunBest') || 0;
+  bestEl.textContent = '$' + best.toLocaleString();
+  let running = false;
+  let lastT = 0;
+  let copSpawnTimer = 0;
+  let crimeSpawnTimer = 0;
+
+  // ---------- Input ----------
+  const keys = new Set();
+  window.addEventListener('keydown', e => {
+    keys.add(e.key.toLowerCase());
+    if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+  // ---------- Game loop ----------
+  function reset() {
+    player.x = BLOCK; player.y = BLOCK;
+    player.angle = -Math.PI / 2;
+    player.speed = 0;
+    player.alive = true;
+    bounty = 0; heat = 0; wantedLevel = 0;
+    cops.length = 0;
+    crimeSpots.length = 0;
+    copSpawnTimer = 0;
+    crimeSpawnTimer = 0;
+    lastCrimeAt = performance.now();
+    for (let i = 0; i < 6; i++) spawnCrimeSpot();
+    buildCity();
+  }
+
+  function start() {
+    overlay.classList.add('hidden');
+    finalScore.style.display = 'none';
+    reset();
+    running = true;
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', start);
+
+  function gameOver() {
+    running = false;
+    if (bounty > best) {
+      best = bounty;
+      localStorage.setItem('bountyRunBest', String(best));
+      bestEl.textContent = '$' + best.toLocaleString();
+    }
+    finalScore.style.display = 'block';
+    finalScore.innerHTML = `You were busted with <b style="color:#4ade80">$${bounty.toLocaleString()}</b> in bounty.<br/>Best: <b>$${best.toLocaleString()}</b>`;
+    overlay.classList.remove('hidden');
+    startBtn.textContent = 'RUN AGAIN';
+  }
+
+  function flashRed() {
+    flash.style.opacity = '0.5';
+    setTimeout(() => { flash.style.opacity = '0'; }, 140);
+  }
+
+  function loop(t) {
+    if (!running) return;
+    const dt = Math.min(0.033, (t - lastT) / 1000);
+    lastT = t;
+    update(dt, t);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt, t) {
+    // --- Player input ---
+    const up = keys.has('w') || keys.has('arrowup');
+    const down = keys.has('s') || keys.has('arrowdown');
+    const left = keys.has('a') || keys.has('arrowleft');
+    const right = keys.has('d') || keys.has('arrowright');
+    const handbrake = keys.has(' ');
+
+    if (up) player.speed += player.accel * dt;
+    else if (down) player.speed -= player.brake * dt;
+    else {
+      // friction
+      const f = player.friction * dt;
+      if (player.speed > 0) player.speed = Math.max(0, player.speed - f);
+      else if (player.speed < 0) player.speed = Math.min(0, player.speed + f);
+    }
+    if (handbrake) player.speed *= Math.pow(0.02, dt);
+    player.speed = Math.max(-player.maxSpeed * 0.5, Math.min(player.maxSpeed, player.speed));
+
+    // Steering scales with speed so you can't pivot in place
+    const steer = (left ? -1 : 0) + (right ? 1 : 0);
+    const speedFactor = Math.min(1, Math.abs(player.speed) / 80);
+    player.angle += steer * player.turn * dt * speedFactor * Math.sign(player.speed || 1);
+
+    // Try-move with simple building collision (slide).
+    moveWithCollision(player, dt);
+
+    // Clamp to world
+    player.x = Math.max(20, Math.min(WORLD.w - 20, player.x));
+    player.y = Math.max(20, Math.min(WORLD.h - 20, player.y));
+
+    // --- Camera follows ---
+    camera.x = player.x - W / 2;
+    camera.y = player.y - H / 2;
+
+    // --- Crime collection ---
+    for (let i = crimeSpots.length - 1; i >= 0; i--) {
+      const c = crimeSpots[i];
+      c.pulse += dt * 4;
+      const d = Math.hypot(player.x - c.x, player.y - c.y);
+      if (d < c.r + 18) {
+        bounty += c.value;
+        heat = Math.min(1, heat + 0.18 + c.value / 5000);
+        lastCrimeAt = t;
+        crimeSpots.splice(i, 1);
+        // Add some cops based on heat.
+        const want = Math.ceil(heat * 5);
+        while (cops.length < want) spawnCop();
+        flashGreen();
+      }
+    }
+
+    // --- Heat cooldown ---
+    const sinceCrime = (t - lastCrimeAt) / 1000;
+    if (sinceCrime > 6) {
+      heat = Math.max(0, heat - 0.04 * dt);
+    }
+    wantedLevel = Math.round(heat * 5);
+
+    // --- Cops ---
+    const targetCops = wantedLevel;
+    copSpawnTimer -= dt;
+    if (cops.length < targetCops && copSpawnTimer <= 0) {
+      spawnCop();
+      copSpawnTimer = 1.2;
+    }
+    // If heat dropped, retire cops that wander far.
+    if (cops.length > targetCops) {
+      for (let i = cops.length - 1; i >= 0; i--) {
+        const c = cops[i];
+        if (Math.hypot(c.x - player.x, c.y - player.y) > 900) {
+          cops.splice(i, 1);
+          if (cops.length <= targetCops) break;
+        }
+      }
+    }
+
+    for (const cop of cops) {
+      // Steer toward player.
+      const dx = player.x - cop.x;
+      const dy = player.y - cop.y;
+      const desired = Math.atan2(dy, dx) + Math.PI / 2; // car forward is -y when angle=0? we use angle: forward vec = (sin, -cos)
+      // We use forward vector = (sin(angle), -cos(angle)), so to face target, angle = atan2(dy, dx) + PI/2.
+      let diff = desired - cop.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const turnAmount = Math.max(-cop.turn * dt, Math.min(cop.turn * dt, diff));
+      cop.angle += turnAmount;
+      // Cops accelerate harder when high wanted level.
+      const boost = 1 + wantedLevel * 0.08;
+      cop.speed += cop.accel * dt * boost;
+      cop.speed = Math.min(cop.maxSpeed * boost, cop.speed);
+      moveWithCollision(cop, dt);
+      cop.sirenPhase += dt * 10;
+
+      // Caught?
+      const dist = Math.hypot(cop.x - player.x, cop.y - player.y);
+      if (dist < 28 && player.alive) {
+        player.alive = false;
+        flashRed();
+        setTimeout(gameOver, 350);
+      }
+    }
+
+    // --- Keep spawning crime spots over time ---
+    crimeSpawnTimer -= dt;
+    if (crimeSpawnTimer <= 0 && crimeSpots.length < 8) {
+      spawnCrimeSpot();
+      crimeSpawnTimer = 3;
+    }
+
+    // --- HUD ---
+    moneyEl.textContent = '$' + bounty.toLocaleString();
+    starsEl.textContent = wantedLevel === 0 ? '—' : '★'.repeat(wantedLevel);
+    heatEl.textContent = Math.round(heat * 100) + '%';
+  }
+
+  function flashGreen() {
+    flash.style.background = '#4ade80';
+    flash.style.opacity = '0.35';
+    setTimeout(() => {
+      flash.style.opacity = '0';
+      setTimeout(() => { flash.style.background = 'red'; }, 200);
+    }, 100);
+  }
+
+  function moveWithCollision(ent, dt) {
+    // Forward vector: (sin(angle), -cos(angle))
+    const fx = Math.sin(ent.angle);
+    const fy = -Math.cos(ent.angle);
+    const nx = ent.x + fx * ent.speed * dt;
+    const ny = ent.y + fy * ent.speed * dt;
+    // Test x and y separately for a simple slide.
+    if (!hitsBuilding(nx, ent.y, ent.w, ent.h)) {
+      ent.x = nx;
+    } else {
+      ent.speed *= 0.4;
+    }
+    if (!hitsBuilding(ent.x, ny, ent.w, ent.h)) {
+      ent.y = ny;
+    } else {
+      ent.speed *= 0.4;
+    }
+  }
+
+  function hitsBuilding(x, y, w, h) {
+    // Simple circle vs rect using bounding circle.
+    const r = Math.max(w, h) / 2;
+    // Only test buildings near the entity (broad-phase by block).
+    const bx = Math.floor(x / BLOCK);
+    const by = Math.floor(y / BLOCK);
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const blockX = (bx + i) * BLOCK;
+        const blockY = (by + j) * BLOCK;
+        for (const b of buildings) {
+          if (b.x > blockX + BLOCK || b.x + b.w < blockX) continue;
+          if (b.y > blockY + BLOCK || b.y + b.h < blockY) continue;
+          const cx = Math.max(b.x, Math.min(x, b.x + b.w));
+          const cy = Math.max(b.y, Math.min(y, b.y + b.h));
+          if ((cx - x) * (cx - x) + (cy - y) * (cy - y) < r * r) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // ---------- Render ----------
+  function render() {
+    // Background (grass)
+    ctx.fillStyle = '#2a3b1e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Determine which blocks are on screen.
+    const x0 = Math.floor(camera.x / BLOCK) - 1;
+    const y0 = Math.floor(camera.y / BLOCK) - 1;
+    const x1 = Math.ceil((camera.x + W) / BLOCK) + 1;
+    const y1 = Math.ceil((camera.y + H) / BLOCK) + 1;
+
+    // Draw roads (one tile per block — its surrounding road strip).
+    ctx.fillStyle = '#2b2f36';
+    for (let bx = x0; bx <= x1; bx++) {
+      const sx = bx * BLOCK - camera.x;
+      // Vertical road strip on the block's left edge
+      ctx.fillRect(sx - ROAD / 2, (y0 - 1) * BLOCK - camera.y, ROAD, (y1 - y0 + 2) * BLOCK);
+    }
+    for (let by = y0; by <= y1; by++) {
+      const sy = by * BLOCK - camera.y;
+      ctx.fillRect((x0 - 1) * BLOCK - camera.x, sy - ROAD / 2, (x1 - x0 + 2) * BLOCK, ROAD);
+    }
+
+    // Road centre dashed lines
+    ctx.strokeStyle = '#f1c40f';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([18, 18]);
+    for (let bx = x0; bx <= x1; bx++) {
+      const sx = bx * BLOCK - camera.x;
+      ctx.beginPath();
+      ctx.moveTo(sx, (y0 - 1) * BLOCK - camera.y);
+      ctx.lineTo(sx, (y1 + 1) * BLOCK - camera.y);
+      ctx.stroke();
+    }
+    for (let by = y0; by <= y1; by++) {
+      const sy = by * BLOCK - camera.y;
+      ctx.beginPath();
+      ctx.moveTo((x0 - 1) * BLOCK - camera.x, sy);
+      ctx.lineTo((x1 + 1) * BLOCK - camera.x, sy);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // Draw buildings near the camera
+    const camRight = camera.x + W, camBottom = camera.y + H;
+    for (const b of buildings) {
+      if (b.x + b.w < camera.x - 10 || b.x > camRight + 10) continue;
+      if (b.y + b.h < camera.y - 10 || b.y > camBottom + 10) continue;
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(b.x - camera.x + 4, b.y - camera.y + 4, b.w, b.h);
+      // Body
+      ctx.fillStyle = b.c;
+      ctx.fillRect(b.x - camera.x, b.y - camera.y, b.w, b.h);
+      // Windows
+      ctx.fillStyle = 'rgba(255, 220, 120, 0.18)';
+      const winSize = 10, gap = 6;
+      for (let wx = b.x + 8; wx < b.x + b.w - 8; wx += winSize + gap) {
+        for (let wy = b.y + 8; wy < b.y + b.h - 8; wy += winSize + gap) {
+          ctx.fillRect(wx - camera.x, wy - camera.y, winSize, winSize);
+        }
+      }
+      // Roof outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(b.x - camera.x + 0.5, b.y - camera.y + 0.5, b.w, b.h);
+    }
+
+    // Crime spots
+    for (const c of crimeSpots) {
+      const sx = c.x - camera.x;
+      const sy = c.y - camera.y;
+      if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
+      const pulse = 6 + Math.sin(c.pulse) * 4;
+      // Glow
+      const grad = ctx.createRadialGradient(sx, sy, 4, sx, sy, c.r + pulse + 14);
+      grad.addColorStop(0, 'rgba(255, 60, 60, 0.8)');
+      grad.addColorStop(1, 'rgba(255, 60, 60, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sx, sy, c.r + pulse + 14, 0, Math.PI * 2);
+      ctx.fill();
+      // Dollar marker
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.arc(sx, sy, c.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd166';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', sx, sy + 1);
+    }
+
+    // Cops
+    for (const cop of cops) {
+      const sx = cop.x - camera.x;
+      const sy = cop.y - camera.y;
+      if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
+      drawCar(sx, sy, cop.angle, '#1f3fff', '#ffffff', true, cop.sirenPhase);
+      // Vision/chase line when close
+      const d = Math.hypot(cop.x - player.x, cop.y - player.y);
+      if (d < 320) {
+        ctx.strokeStyle = 'rgba(255,0,0,' + (0.35 * (1 - d / 320)) + ')';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(player.x - camera.x, player.y - camera.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Player car
+    const psx = player.x - camera.x;
+    const psy = player.y - camera.y;
+    drawCar(psx, psy, player.angle, '#e63946', '#ffd166', false, 0);
+
+    // Minimap
+    drawMinimap();
+  }
+
+  function drawCar(sx, sy, angle, body, accent, isCop, sirenPhase) {
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(angle);
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(-12 + 3, -20 + 3, 24, 40);
+    // Body
+    ctx.fillStyle = body;
+    roundRect(-12, -20, 24, 40, 4, true, false);
+    // Cabin
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    roundRect(-9, -10, 18, 18, 3, true, false);
+    // Hood stripe / decals
+    ctx.fillStyle = accent;
+    ctx.fillRect(-2, -20, 4, 8);
+    ctx.fillRect(-2, 12, 4, 8);
+    // Cop sirens
+    if (isCop) {
+      const flashRed = (Math.sin(sirenPhase) > 0);
+      ctx.fillStyle = flashRed ? '#ff2a2a' : '#1a1a1a';
+      ctx.fillRect(-8, -3, 6, 4);
+      ctx.fillStyle = !flashRed ? '#2a6bff' : '#1a1a1a';
+      ctx.fillRect(2, -3, 6, 4);
+    }
+    // Headlights
+    ctx.fillStyle = '#fff9c4';
+    ctx.fillRect(-10, -21, 4, 2);
+    ctx.fillRect(6, -21, 4, 2);
+    // Outline
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.lineWidth = 1.5;
+    roundRect(-12, -20, 24, 40, 4, false, true);
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r, fill, stroke) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  function drawMinimap() {
+    const size = 160;
+    const pad = 12;
+    const x = W - size - pad;
+    const y = pad;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeRect(x + 0.5, y + 0.5, size, size);
+    const scale = size / WORLD.w;
+    // Crime spots
+    for (const c of crimeSpots) {
+      ctx.fillStyle = '#ff3b3b';
+      ctx.fillRect(x + c.x * scale - 1.5, y + c.y * scale - 1.5, 3, 3);
+    }
+    // Cops
+    for (const cop of cops) {
+      ctx.fillStyle = '#3aa0ff';
+      ctx.fillRect(x + cop.x * scale - 1.5, y + cop.y * scale - 1.5, 3, 3);
+    }
+    // Player
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(x + player.x * scale - 2, y + player.y * scale - 2, 4, 4);
+  }
+
+  // Build once so the menu screen could also preview if we wanted.
+  buildCity();
+})();
+</script>
+</body>
+</html>
