@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0e1014" />
 <title>Bounty Run — Crime Car Chase</title>
 <style>
   :root {
@@ -16,7 +21,7 @@
     --money: #4ade80;
     --text: #ffffff;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; padding: 0; height: 100%;
     background: var(--bg);
@@ -24,6 +29,10 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overflow: hidden;
     user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none;
+    overscroll-behavior: none;
   }
   #wrap {
     position: relative;
@@ -88,6 +97,106 @@
     background: red; opacity: 0;
     transition: opacity 120ms ease-out;
   }
+
+  /* ----- Touch controls ----- */
+  #touch {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    display: none;
+  }
+  body.touch #touch { display: block; }
+
+  #stick {
+    position: absolute;
+    left: 24px; bottom: 24px;
+    width: 150px; height: 150px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.25);
+    pointer-events: auto;
+    touch-action: none;
+  }
+  #stickNub {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 64px; height: 64px;
+    margin: -32px 0 0 -32px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.85);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    transition: background 80ms;
+    pointer-events: none;
+  }
+
+  #brakeBtn {
+    position: absolute;
+    right: 24px; bottom: 36px;
+    width: 110px; height: 110px;
+    border-radius: 50%;
+    background: rgba(255,59,59,0.85);
+    color: white;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 1px;
+    border: 3px solid rgba(255,255,255,0.4);
+    pointer-events: auto;
+    touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+  #brakeBtn.active { background: #ffd166; color: #1a1a1a; }
+
+  #gasBtn {
+    position: absolute;
+    right: 140px; bottom: 36px;
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    background: rgba(74,222,128,0.85);
+    color: #0e1014;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 1px;
+    border: 3px solid rgba(255,255,255,0.4);
+    pointer-events: auto;
+    touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+  #gasBtn.active { background: #ffd166; }
+
+  /* ----- Responsive ----- */
+  @media (max-width: 720px) {
+    #hud {
+      font-size: 12px;
+      min-width: 0;
+      padding: 8px 10px;
+      top: max(8px, env(safe-area-inset-top));
+      left: max(8px, env(safe-area-inset-left));
+    }
+    #hud .row { gap: 10px; }
+    #help { display: none; }
+    #overlay h1 { font-size: 32px; }
+    #overlay h2 { font-size: 16px; }
+    #overlay p { font-size: 14px; }
+    #stick {
+      left: max(16px, env(safe-area-inset-left));
+      bottom: max(16px, env(safe-area-inset-bottom));
+      width: 130px; height: 130px;
+    }
+    #stickNub { width: 56px; height: 56px; margin: -28px 0 0 -28px; }
+    #brakeBtn {
+      right: max(16px, env(safe-area-inset-right));
+      bottom: max(28px, env(safe-area-inset-bottom));
+      width: 92px; height: 92px;
+      font-size: 12px;
+    }
+    #gasBtn {
+      right: calc(max(16px, env(safe-area-inset-right)) + 102px);
+      bottom: max(28px, env(safe-area-inset-bottom));
+      width: 78px; height: 78px;
+      font-size: 12px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -102,12 +211,18 @@
   <div id="help">
     <b>WASD</b> or <b>Arrow keys</b> to drive. Roll over a <b>red crime spot</b> to rob it — your bounty goes up and the cops come for you. Lose all your heat by laying low (no crimes for a while). Don't get caught!
   </div>
+  <div id="touch">
+    <div id="stick"><div id="stickNub"></div></div>
+    <button id="gasBtn" type="button">GAS</button>
+    <button id="brakeBtn" type="button">BRAKE</button>
+  </div>
   <div id="flash"></div>
   <div id="overlay">
     <h1>BOUNTY RUN</h1>
     <h2>Crime. Cash. Car chase.</h2>
     <p>You're a getaway driver. Hit the red <b>crime spots</b> to rack up bounty. The more you steal, the more cops show up — and the faster they get.</p>
-    <p>Drive with <b>WASD</b> or arrow keys. Press <b>Space</b> for handbrake.</p>
+    <p class="ctrl-desktop">Drive with <b>WASD</b> or arrow keys. Press <b>Space</b> for handbrake.</p>
+    <p class="ctrl-mobile" style="display:none;">Use the <b>joystick</b> to steer, <b>GAS</b> to accelerate, <b>BRAKE</b> to slow or reverse.</p>
     <p id="finalScore" style="display:none;"></p>
     <button id="startBtn">START</button>
   </div>
@@ -271,6 +386,102 @@
   });
   window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 
+  // Touch input
+  const touchInput = { steer: 0, gas: 0, brake: 0 };
+  const isTouchDevice = (('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+  if (isTouchDevice) {
+    document.body.classList.add('touch');
+    const desc = document.querySelector('.ctrl-desktop');
+    const mdesc = document.querySelector('.ctrl-mobile');
+    if (desc) desc.style.display = 'none';
+    if (mdesc) mdesc.style.display = 'block';
+  }
+
+  // Virtual joystick
+  const stick = document.getElementById('stick');
+  const stickNub = document.getElementById('stickNub');
+  let stickTouchId = null;
+  let stickCenter = { x: 0, y: 0 };
+  const STICK_RADIUS = 55;
+
+  function stickStart(e) {
+    e.preventDefault();
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    const rect = stick.getBoundingClientRect();
+    stickCenter.x = rect.left + rect.width / 2;
+    stickCenter.y = rect.top + rect.height / 2;
+    stickTouchId = e.changedTouches ? t.identifier : 'mouse';
+    stickMove(e);
+  }
+  function stickMove(e) {
+    if (stickTouchId === null) return;
+    e.preventDefault();
+    let pt = null;
+    if (e.changedTouches) {
+      for (const t of e.changedTouches) {
+        if (t.identifier === stickTouchId) { pt = t; break; }
+      }
+      if (!pt) return;
+    } else {
+      pt = e;
+    }
+    let dx = pt.clientX - stickCenter.x;
+    let dy = pt.clientY - stickCenter.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > STICK_RADIUS) {
+      dx = dx / dist * STICK_RADIUS;
+      dy = dy / dist * STICK_RADIUS;
+    }
+    stickNub.style.transform = `translate(${dx}px, ${dy}px)`;
+    // Steering: full strength at full deflection.
+    touchInput.steer = Math.max(-1, Math.min(1, dx / STICK_RADIUS));
+    // Forward/back from vertical axis - lets joystick alone drive if you want.
+    const v = -dy / STICK_RADIUS;
+    if (v > 0.15) { touchInput.gas = Math.min(1, v); touchInput.brake = 0; }
+    else if (v < -0.15) { touchInput.brake = Math.min(1, -v); touchInput.gas = 0; }
+    else { /* let dedicated buttons control gas/brake */ }
+  }
+  function stickEnd(e) {
+    if (stickTouchId === null) return;
+    if (e.changedTouches) {
+      let match = false;
+      for (const t of e.changedTouches) {
+        if (t.identifier === stickTouchId) { match = true; break; }
+      }
+      if (!match) return;
+    }
+    stickTouchId = null;
+    stickNub.style.transform = 'translate(0,0)';
+    touchInput.steer = 0;
+    touchInput.gas = 0;
+    touchInput.brake = 0;
+  }
+  stick.addEventListener('touchstart', stickStart, { passive: false });
+  stick.addEventListener('touchmove', stickMove, { passive: false });
+  stick.addEventListener('touchend', stickEnd, { passive: false });
+  stick.addEventListener('touchcancel', stickEnd, { passive: false });
+  stick.addEventListener('mousedown', stickStart);
+  window.addEventListener('mousemove', e => { if (stickTouchId === 'mouse') stickMove(e); });
+  window.addEventListener('mouseup', e => { if (stickTouchId === 'mouse') stickEnd({}); });
+
+  // Gas + Brake buttons
+  function bindHold(el, onDown, onUp) {
+    const down = e => { e.preventDefault(); el.classList.add('active'); onDown(); };
+    const up = e => { e.preventDefault(); el.classList.remove('active'); onUp(); };
+    el.addEventListener('touchstart', down, { passive: false });
+    el.addEventListener('touchend', up, { passive: false });
+    el.addEventListener('touchcancel', up, { passive: false });
+    el.addEventListener('mousedown', down);
+    el.addEventListener('mouseup', up);
+    el.addEventListener('mouseleave', up);
+  }
+  bindHold(document.getElementById('gasBtn'),
+    () => { touchInput.gas = 1; },
+    () => { touchInput.gas = 0; });
+  bindHold(document.getElementById('brakeBtn'),
+    () => { touchInput.brake = 1; },
+    () => { touchInput.brake = 0; });
+
   // ---------- Game loop ----------
   function reset() {
     player.x = BLOCK; player.y = BLOCK;
@@ -325,15 +536,21 @@
   }
 
   function update(dt, t) {
-    // --- Player input ---
-    const up = keys.has('w') || keys.has('arrowup');
-    const down = keys.has('s') || keys.has('arrowdown');
-    const left = keys.has('a') || keys.has('arrowleft');
-    const right = keys.has('d') || keys.has('arrowright');
+    // --- Player input (keyboard + touch combined) ---
+    const kUp = keys.has('w') || keys.has('arrowup');
+    const kDown = keys.has('s') || keys.has('arrowdown');
+    const kLeft = keys.has('a') || keys.has('arrowleft');
+    const kRight = keys.has('d') || keys.has('arrowright');
     const handbrake = keys.has(' ');
 
-    if (up) player.speed += player.accel * dt;
-    else if (down) player.speed -= player.brake * dt;
+    const gas = Math.max(kUp ? 1 : 0, touchInput.gas);
+    const brakeIn = Math.max(kDown ? 1 : 0, touchInput.brake);
+    // Steering: -1..1, keyboard is digital, touch is analog.
+    let steer = (kLeft ? -1 : 0) + (kRight ? 1 : 0);
+    if (steer === 0) steer = touchInput.steer;
+
+    if (gas > 0) player.speed += player.accel * dt * gas;
+    else if (brakeIn > 0) player.speed -= player.brake * dt * brakeIn;
     else {
       // friction
       const f = player.friction * dt;
@@ -344,7 +561,6 @@
     player.speed = Math.max(-player.maxSpeed * 0.5, Math.min(player.maxSpeed, player.speed));
 
     // Steering scales with speed so you can't pivot in place
-    const steer = (left ? -1 : 0) + (right ? 1 : 0);
     const speedFactor = Math.min(1, Math.abs(player.speed) / 80);
     player.angle += steer * player.turn * dt * speedFactor * Math.sign(player.speed || 1);
 
