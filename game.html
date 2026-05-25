@@ -105,21 +105,21 @@
     align-items: center; justify-content: center;
     text-align: center; padding: 20px;
     z-index: 10;
+    cursor: pointer;
   }
   #menu.hidden { display: none; }
   #menu h1 { font-size: 38px; margin: 0 0 6px; letter-spacing: 2px; }
   #menu h2 { font-size: 18px; margin: 0 0 14px; color: #ffd166; }
   #menu p { max-width: 460px; opacity: 0.85; margin: 4px 0; font-size: 14px; line-height: 1.5; }
-  #startBtn {
-    margin-top: 18px;
-    background: #ff3b3b;
-    color: white; border: none;
-    padding: 16px 32px; font-size: 18px;
-    border-radius: 10px; cursor: pointer;
-    font-weight: 800; letter-spacing: 2px;
-    -webkit-appearance: none; appearance: none;
-    touch-action: manipulation;
+  #menu .hint {
+    margin-top: 24px;
+    font-size: 22px;
+    color: #ffd166;
+    animation: pulse 1s ease-in-out infinite;
+    font-weight: 800;
+    letter-spacing: 2px;
   }
+  @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
 
   #err {
     position: absolute; left: 8px; right: 8px; top: 8px;
@@ -152,7 +152,7 @@
     <p>Drive over red <b style="color:#ff8080">crime spots</b> to grab bounty. More crime = more cops chasing you.</p>
     <p id="ctrlText">WASD / arrows to drive. Space = handbrake.</p>
     <p id="finalScore" style="display:none;"></p>
-    <button id="startBtn">TAP TO START</button>
+    <div class="hint">TAP ANYWHERE</div>
   </div>
 </div>
 
@@ -171,7 +171,6 @@ try {
   const heatEl = document.getElementById('heat');
   const bestEl = document.getElementById('best');
   const menu = document.getElementById('menu');
-  const startBtn = document.getElementById('startBtn');
   const finalScore = document.getElementById('finalScore');
   const flash = document.getElementById('flash');
   const ctrlText = document.getElementById('ctrlText');
@@ -397,9 +396,20 @@ try {
     requestAnimationFrame(loop);
   }
 
-  // Both click and touchend on START so it's reliable on every browser
-  startBtn.addEventListener('click', start);
-  startBtn.addEventListener('touchend', e => { e.preventDefault(); start(); }, { passive: false });
+  // Tap anywhere on the menu to start (or restart). Bind multiple events so it fires reliably on every browser.
+  let starting = false;
+  function tryStart(e) {
+    if (starting || running) return;
+    if (e) e.preventDefault();
+    starting = true;
+    start();
+    setTimeout(() => { starting = false; }, 300);
+  }
+  menu.addEventListener('click', tryStart);
+  menu.addEventListener('touchend', tryStart, { passive: false });
+  menu.addEventListener('pointerup', tryStart);
+  // Keyboard: any key also starts.
+  window.addEventListener('keydown', e => { if (!running) tryStart(e); }, true);
 
   function gameOver() {
     running = false;
@@ -410,7 +420,7 @@ try {
     }
     finalScore.style.display = 'block';
     finalScore.innerHTML = 'Busted with <b style="color:#4ade80">$' + bounty.toLocaleString() + '</b><br/>Best: <b>$' + best.toLocaleString() + '</b>';
-    startBtn.textContent = 'RUN AGAIN';
+    menu.querySelector('.hint').textContent = 'TAP TO RUN AGAIN';
     menu.classList.remove('hidden');
   }
 
